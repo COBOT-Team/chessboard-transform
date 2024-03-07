@@ -1,5 +1,5 @@
-#include <opencv2/opencv.hpp>
 #include <opencv2/calib3d.hpp>
+#include <opencv2/opencv.hpp>
 
 #include "chessboard_transform_params.hpp"
 #include "cv_bridge/cv_bridge.h"
@@ -166,7 +166,11 @@ private:
       cv::Point2f(CHESSBOARD_SIZE, 0.0),
       cv::Point2f(0.0, 0.0),
     };
-    static const double HALF_CB = CHESSBOARD_SIZE / 2000.0;  // Half of cb size, in m
+
+    // We use the SOLVEPNP_IPPE_SQUARE method to estimate the pose of the chessboard. This method
+    // requires that the real-world points are arranged in the below format. We also convert the
+    // chessboard size from mm to meters, since ROS uses meters as its unit of distance.
+    static const double HALF_CB = CHESSBOARD_SIZE / 2000.0;  // Half of chessboard size, in meters.
     static const vector<cv::Point3d> PNP_CHESSBOARD_CORNERS = {
       cv::Point3d(-HALF_CB, HALF_CB, 0.0),
       cv::Point3d(HALF_CB, HALF_CB, 0.0),
@@ -191,36 +195,36 @@ private:
     }
 
     // Check for camera info.
+    // TODO: Does this actually work?
     if (!cinfo) {
       RCLCPP_ERROR(node->get_logger(), "No camera info received");
       return;
     }
 
-    // Extract camera info.
+    // Extract camera info into OpenCV format.
     string camera_frame = cinfo->header.frame_id;
     cv::Mat camera_matrix(3, 3, CV_64F, (void*)cinfo->k.data());
     cv::Mat dist_coeffs(1, 5, CV_64F, (void*)cinfo->d.data());
 
     // Find the chessboard in the image.
     auto chessboard_corners = find_chessboard_corners(cv_ptr->image);
-    
+
     // If the chessboard was found in the image, update TF and perspective transform.
     bool found = chessboard_corners.size() == 4;
     if (found) {
-
       // Estimate pose.
       cv::Vec3d rvec;
       cv::Vec3d tvec;
       cv::Mat rmat(3, 3, CV_64F);
-      cv::solvePnP(PNP_CHESSBOARD_CORNERS, chessboard_corners, camera_matrix, dist_coeffs, rvec, tvec, false, cv::SOLVEPNP_IPPE_SQUARE);
+      cv::solvePnP(PNP_CHESSBOARD_CORNERS, chessboard_corners, camera_matrix, dist_coeffs, rvec,
+                   tvec, false, cv::SOLVEPNP_IPPE_SQUARE);
       cv::Rodrigues(rvec, rmat);
 
       // Convert pose to tf2 format.
-       tf2::Vector3 tvec_tf(tvec[0], tvec[1], tvec[2]);
-       tf2::Matrix3x3 rmat_tf(
-          rmat.at<double>(0, 0), rmat.at<double>(0, 1), rmat.at<double>(0, 2),
-          rmat.at<double>(1, 0), rmat.at<double>(1, 1), rmat.at<double>(1, 2),
-          rmat.at<double>(2, 0), rmat.at<double>(2, 1), rmat.at<double>(2, 2));
+      tf2::Vector3 tvec_tf(tvec[0], tvec[1], tvec[2]);
+      tf2::Matrix3x3 rmat_tf(rmat.at<double>(0, 0), rmat.at<double>(0, 1), rmat.at<double>(0, 2),
+                             rmat.at<double>(1, 0), rmat.at<double>(1, 1), rmat.at<double>(1, 2),
+                             rmat.at<double>(2, 0), rmat.at<double>(2, 1), rmat.at<double>(2, 2));
 
       // Publish the transform from the camera to the chessboard.
       tf2::Transform tf_transform(rmat_tf, tvec_tf);
@@ -232,7 +236,8 @@ private:
       tf_pub_->sendTransform(transform_stamped);
 
       // Update perspective transform.
-      perspective_transform_ = cv::getPerspectiveTransform(chessboard_corners, IRL_CHESSBOARD_CORNERS);
+      perspective_transform_ =
+          cv::getPerspectiveTransform(chessboard_corners, IRL_CHESSBOARD_CORNERS);
     } else {
       RCLCPP_WARN(node->get_logger(), "Couldn't find chessboard");
     }
@@ -242,11 +247,19 @@ private:
     img_header.stamp = now;
     img_header.frame_id = params_->chessboard_frame;
 
-    // Warp the image to the chessboard and publish.
+    // Create a perspective-transformed image of the chessboard.
     static cv::Mat warped;
     static const int BOARD_SIZE_INT = static_cast<int>(round(CHESSBOARD_SIZE));
-    cv::warpPerspective(cv_ptr->image, warped, perspective_transform_, cv::Size(BOARD_SIZE_INT, BOARD_SIZE_INT));
-    if (!found) cv::rectangle(warped, cv::Point(0, 0), cv::Point(BOARD_SIZE_INT, BOARD_SIZE_INT), cv::Scalar(255, 0, 0), 16);
+    cv::warpPerspective(cv_ptr->image, warped, perspective_transform_,
+                        cv::Size(BOARD_SIZE_INT, BOARD_SIZE_INT));
+
+    // If we cannot currently see the chessboard, draw a red square around the image. This indicates
+    // that the perspective transform may not be accurate.
+    if (!found)
+      cv::rectangle(warped, cv::Point(0, 0), cv::Point(BOARD_SIZE_INT, BOARD_SIZE_INT),
+                    cv::Scalar(255, 0, 0), 16);
+
+    // Publish the perspective-transformed image.
     sensor_msgs::msg::Image::SharedPtr msg =
         cv_bridge::CvImage(img_header, sensor_msgs::image_encodings::RGB8, warped).toImageMsg();
     image_pub_->publish(msg);
