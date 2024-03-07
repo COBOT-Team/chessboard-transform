@@ -1,0 +1,21 @@
+chessboard_transform:
+  camera_base_topic:
+    {
+      type: string,
+      default_value: "kinect/color/image",
+      description: "The base topic of the camera publisher that contains the chessboard image.",
+    }
+
+  warped_chessboard_topic:
+    {
+      type: string,
+      default_value: "chessboard/image_rect_color",
+      description: "The base topic to publish warped images of the chessboard to.",
+    }
+
+  chessboard_frame:
+    {
+      type: string,
+      default_value: "chessboard",
+      description: "The TF2 frame_id of the chessboard.",
+    }

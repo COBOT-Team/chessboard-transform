@@ -14,6 +14,15 @@ find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(tf2_geometry_msgs  REQUIRED)
+find_package(generate_parameter_library REQUIRED)
+
+generate_parameter_library(
+  chessboard_transform_params
+  src/parameters.yaml
+)
 
 add_executable(chessboard_transform src/chessboard_transform.cpp)
 target_include_directories(chessboard_transform PUBLIC
@@ -22,11 +31,18 @@ target_include_directories(chessboard_transform PUBLIC
 target_compile_features(chessboard_transform PUBLIC c_std_99 cxx_std_17)  # Require C99 and C++17
 
 ament_target_dependencies(chessboard_transform PUBLIC
-  "cv_bridge"
-  "image_transport"
-  "OpenCV"
-  "rclcpp"
-  "sensor_msgs"
+  cv_bridge
+  image_transport
+  OpenCV
+  rclcpp
+  sensor_msgs
+  tf2
+  tf2_ros
+  tf2_geometry_msgs
+)
+
+target_link_libraries(chessboard_transform PRIVATE
+  chessboard_transform_params
 )
 
 install(TARGETS chessboard_transform
