@@ -165,12 +165,23 @@ private:
 
     auto now = rclcpp::Clock().now();
 
+    // Check for new parameters.
+    if (param_listener_->is_old(*params_)) {
+      *params_ = param_listener_->get_params();
+    }
+
     // Convert the image to an OpenCV image.
     cv_bridge::CvImagePtr cv_ptr;
     try {
       cv_ptr = cv_bridge::toCvCopy(image, sensor_msgs::image_encodings::RGB8);
     } catch (cv_bridge::Exception& e) {
       RCLCPP_ERROR(node->get_logger(), "cv_bridge exception: %s", e.what());
+      return;
+    }
+
+    // Check for camera info.
+    if (!cinfo) {
+      RCLCPP_ERROR(node->get_logger(), "No camera info received");
       return;
     }
 
