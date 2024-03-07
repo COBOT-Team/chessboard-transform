@@ -179,11 +179,6 @@ private:
     cv::Mat camera_matrix(3, 3, CV_64F, (void*)cinfo->k.data());
     cv::Mat dist_coeffs(1, 5, CV_64F, (void*)cinfo->d.data());
 
-    // Construct header that can be used for both the image and the transform.
-    std_msgs::msg::Header header;
-    header.stamp = now;
-    header.frame_id = camera_frame;
-
     // Undistort the image.
     static cv::Mat undistorted;
     cv::undistort(cv_ptr->image, undistorted, camera_matrix, dist_coeffs);
@@ -208,17 +203,23 @@ private:
     // Publish the transform from the camera to the chessboard.
     tf2::Transform tf_transform(rot_matrix_tf, trans_matrix_tf);
     geometry_msgs::msg::TransformStamped transform_stamped;
-    transform_stamped.header = header;
+    transform_stamped.header.stamp = now;
+    transform_stamped.header.frame_id = camera_frame;
     transform_stamped.child_frame_id = params_->chessboard_frame;
     transform_stamped.transform = tf2::toMsg(tf_transform);
     tf_pub_->sendTransform(transform_stamped);
 
-    // Publish the warped chessboard image.
+    // Set the header for the warped image message.
+    std_msgs::msg::Header img_header;
+    img_header.stamp = now;
+    img_header.frame_id = params_->chessboard_frame;
+
+    // Warp the image to the chessboard frame and publish it.
     cv::Mat warped;
     static const int BOARD_SIZE_INT = static_cast<int>(round(CHESSBOARD_SIZE));
     cv::warpPerspective(undistorted, warped, transform, cv::Size(BOARD_SIZE_INT, BOARD_SIZE_INT));
     sensor_msgs::msg::Image::SharedPtr msg =
-        cv_bridge::CvImage(header, sensor_msgs::image_encodings::RGB8, warped).toImageMsg();
+        cv_bridge::CvImage(img_header, sensor_msgs::image_encodings::RGB8, warped).toImageMsg();
     image_pub_->publish(msg);
   }
 };
