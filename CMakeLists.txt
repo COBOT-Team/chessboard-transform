@@ -9,7 +9,6 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
-find_package(OpenCV REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
@@ -18,6 +17,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs  REQUIRED)
 find_package(generate_parameter_library REQUIRED)
+find_package(OpenCV REQUIRED)
 
 generate_parameter_library(
   chessboard_transform_params
@@ -33,7 +33,6 @@ target_compile_features(chessboard_transform PUBLIC c_std_99 cxx_std_17)  # Requ
 ament_target_dependencies(chessboard_transform PUBLIC
   cv_bridge
   image_transport
-  OpenCV
   rclcpp
   sensor_msgs
   tf2
@@ -41,8 +40,16 @@ ament_target_dependencies(chessboard_transform PUBLIC
   tf2_geometry_msgs
 )
 
+target_include_directories(chessboard_transform PUBLIC
+  ${OpenCV_INCLUDE_DIRS}
+)
+
 target_link_libraries(chessboard_transform PRIVATE
   chessboard_transform_params
+)
+
+target_link_libraries(chessboard_transform PUBLIC
+  ${OpenCV_LIBS}
 )
 
 install(TARGETS chessboard_transform

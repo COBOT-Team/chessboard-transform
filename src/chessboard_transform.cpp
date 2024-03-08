@@ -1,5 +1,5 @@
-#include <opencv2/aruco.hpp>
 #include <opencv2/opencv.hpp>
+#include <opencv2/calib3d.hpp>
 
 #include "chessboard_transform_params.hpp"
 #include "cv_bridge/cv_bridge.h"
@@ -35,7 +35,7 @@ static const float CHESSBOARD_SIZE = 377.825f;
 /**
  * The order of the ArUco markers on the chessboard.
  */
-static const int ARUCO_ORDER[] = { 2, 3, 0, 1 };
+static const int ARUCO_ORDER[] = { 3, 0, 1, 2 };
 
 /**
  * Lookup table that determines which corner of each ArUco marker corresponds with its corner of the
@@ -78,6 +78,8 @@ public:
     auto bound_callback = bind(&ChessboardTransform::image_callback, this, _1, _2);
     camera_sub_ = make_unique<image_transport::CameraSubscriber>(
         it_->subscribeCamera(params_->camera_base_topic, 1, bound_callback));
+
+    RCLCPP_INFO(node->get_logger(), "Starting chessboard transform");
   }
 
 private:
@@ -88,15 +90,17 @@ private:
   unique_ptr<image_transport::CameraSubscriber> camera_sub_;  //< Camera subscriber for this node.
   unique_ptr<tf2_ros::TransformBroadcaster> tf_pub_;  //< Transform broadcaster for this node.
 
+  cv::Mat perspective_transform_;
+
   /**
    * Return the aruco params used for this node.
    *
    * @return aruco params
    */
-  cv::Ptr<cv::aruco::DetectorParameters> aruco_params()
+  cv::aruco::DetectorParameters aruco_params()
   {
-    auto params = new cv::aruco::DetectorParameters();
-    return cv::Ptr<cv::aruco::DetectorParameters>(params);
+    auto params = cv::aruco::DetectorParameters();
+    return params;
   }
 
   /**
@@ -114,14 +118,14 @@ private:
     // Static variables to avoid re-initialization and re-allocation.
     static const auto aruco_detector_params = aruco_params();
     static const auto aruco_dictionary = cv::aruco::getPredefinedDictionary(ARUCO_DICT);
+    static const cv::aruco::ArucoDetector aruco_detector(aruco_dictionary, aruco_detector_params);
     static vector<int> aruco_ids;
     static vector<vector<cv::Point2f>> aruco_corners;
 
     // Detect the aruco markers in the image.
     aruco_ids.clear();
     aruco_corners.clear();
-    cv::aruco::detectMarkers(img, aruco_dictionary, aruco_corners, aruco_ids,
-                             aruco_detector_params);
+    aruco_detector.detectMarkers(img, aruco_corners, aruco_ids);
     if (aruco_ids.size() < 4) return {};
 
     // Find the proper markers in order and add the correct corners to our output list.
@@ -157,10 +161,17 @@ private:
   {
     // The corners of the real-world chessboard, measured in mm.
     static const vector<cv::Point2f> IRL_CHESSBOARD_CORNERS = {
-      cv::Point2f(0.0, 0.0),
       cv::Point2f(0.0, CHESSBOARD_SIZE),
       cv::Point2f(CHESSBOARD_SIZE, CHESSBOARD_SIZE),
       cv::Point2f(CHESSBOARD_SIZE, 0.0),
+      cv::Point2f(0.0, 0.0),
+    };
+    static const double HALF_CB = CHESSBOARD_SIZE / 2000.0;  // Half of cb size, in m
+    static const vector<cv::Point3d> PNP_CHESSBOARD_CORNERS = {
+      cv::Point3d(-HALF_CB, HALF_CB, 0.0),
+      cv::Point3d(HALF_CB, HALF_CB, 0.0),
+      cv::Point3d(HALF_CB, -HALF_CB, 0.0),
+      cv::Point3d(-HALF_CB, -HALF_CB, 0.0),
     };
 
     auto now = rclcpp::Clock().now();
@@ -190,45 +201,52 @@ private:
     cv::Mat camera_matrix(3, 3, CV_64F, (void*)cinfo->k.data());
     cv::Mat dist_coeffs(1, 5, CV_64F, (void*)cinfo->d.data());
 
-    // Undistort the image.
-    static cv::Mat undistorted;
-    cv::undistort(cv_ptr->image, undistorted, camera_matrix, dist_coeffs);
+    // Find the chessboard in the image.
+    auto chessboard_corners = find_chessboard_corners(cv_ptr->image);
+    
+    // If the chessboard was found in the image, update TF and perspective transform.
+    bool found = chessboard_corners.size() == 4;
+    if (found) {
 
-    // Estimate the pose of the chessboard in the image.
-    auto chessboard_corners = find_chessboard_corners(undistorted);
-    if (chessboard_corners.size() != 4) return;
-    auto transform = cv::getPerspectiveTransform(IRL_CHESSBOARD_CORNERS, chessboard_corners);
-    static cv::Mat _camera_matrix, rot_matrix;
-    static cv::Vec4d trans_matrix;
-    cv::decomposeProjectionMatrix(transform, _camera_matrix, rot_matrix, trans_matrix);
+      // Estimate pose.
+      cv::Vec3d rvec;
+      cv::Vec3d tvec;
+      cv::Mat rmat(3, 3, CV_64F);
+      cv::solvePnP(PNP_CHESSBOARD_CORNERS, chessboard_corners, camera_matrix, dist_coeffs, rvec, tvec, false, cv::SOLVEPNP_IPPE_SQUARE);
+      cv::Rodrigues(rvec, rmat);
 
-    // Convert pose to tf2 format.
-    tf2::Vector3 trans_matrix_tf(trans_matrix[0] / trans_matrix[3],
-                                 trans_matrix[1] / trans_matrix[3],
-                                 trans_matrix[2] / trans_matrix[3]);
-    tf2::Matrix3x3 rot_matrix_tf(
-        rot_matrix.at<double>(0, 0), rot_matrix.at<double>(0, 1), rot_matrix.at<double>(0, 2),
-        rot_matrix.at<double>(1, 0), rot_matrix.at<double>(1, 1), rot_matrix.at<double>(1, 2),
-        rot_matrix.at<double>(2, 0), rot_matrix.at<double>(2, 1), rot_matrix.at<double>(2, 2));
+      // Convert pose to tf2 format.
+       tf2::Vector3 tvec_tf(tvec[0], tvec[1], tvec[2]);
+       tf2::Matrix3x3 rmat_tf(
+          rmat.at<double>(0, 0), rmat.at<double>(0, 1), rmat.at<double>(0, 2),
+          rmat.at<double>(1, 0), rmat.at<double>(1, 1), rmat.at<double>(1, 2),
+          rmat.at<double>(2, 0), rmat.at<double>(2, 1), rmat.at<double>(2, 2));
 
-    // Publish the transform from the camera to the chessboard.
-    tf2::Transform tf_transform(rot_matrix_tf, trans_matrix_tf);
-    geometry_msgs::msg::TransformStamped transform_stamped;
-    transform_stamped.header.stamp = now;
-    transform_stamped.header.frame_id = camera_frame;
-    transform_stamped.child_frame_id = params_->chessboard_frame;
-    transform_stamped.transform = tf2::toMsg(tf_transform);
-    tf_pub_->sendTransform(transform_stamped);
+      // Publish the transform from the camera to the chessboard.
+      tf2::Transform tf_transform(rmat_tf, tvec_tf);
+      geometry_msgs::msg::TransformStamped transform_stamped;
+      transform_stamped.header.stamp = now;
+      transform_stamped.header.frame_id = camera_frame;
+      transform_stamped.child_frame_id = params_->chessboard_frame;
+      transform_stamped.transform = tf2::toMsg(tf_transform);
+      tf_pub_->sendTransform(transform_stamped);
+
+      // Update perspective transform.
+      perspective_transform_ = cv::getPerspectiveTransform(chessboard_corners, IRL_CHESSBOARD_CORNERS);
+    } else {
+      RCLCPP_WARN(node->get_logger(), "Couldn't find chessboard");
+    }
 
     // Set the header for the warped image message.
     std_msgs::msg::Header img_header;
     img_header.stamp = now;
     img_header.frame_id = params_->chessboard_frame;
 
-    // Warp the image to the chessboard frame and publish it.
-    cv::Mat warped;
+    // Warp the image to the chessboard and publish.
+    static cv::Mat warped;
     static const int BOARD_SIZE_INT = static_cast<int>(round(CHESSBOARD_SIZE));
-    cv::warpPerspective(undistorted, warped, transform, cv::Size(BOARD_SIZE_INT, BOARD_SIZE_INT));
+    cv::warpPerspective(cv_ptr->image, warped, perspective_transform_, cv::Size(BOARD_SIZE_INT, BOARD_SIZE_INT));
+    if (!found) cv::rectangle(warped, cv::Point(0, 0), cv::Point(BOARD_SIZE_INT, BOARD_SIZE_INT), cv::Scalar(255, 0, 0), 16);
     sensor_msgs::msg::Image::SharedPtr msg =
         cv_bridge::CvImage(img_header, sensor_msgs::image_encodings::RGB8, warped).toImageMsg();
     image_pub_->publish(msg);
