@@ -2,7 +2,7 @@ chessboard_transform:
   camera_base_topic:
     {
       type: string,
-      default_value: "kinect/color/image_raw",
+      default_value: "kinect2/color/image_raw",
       description: "The base topic of the camera publisher that contains the chessboard image.",
     }
 
@@ -16,6 +16,6 @@ chessboard_transform:
   chessboard_frame:
     {
       type: string,
-      default_value: "chessboard",
+      default_value: "chessboard_frame",
       description: "The TF2 frame_id of the chessboard.",
     }
