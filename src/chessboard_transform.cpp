@@ -64,6 +64,7 @@ public:
     node = rclcpp::Node::make_shared("chessboard_transform");
     param_listener_ = make_unique<ParamListener>(node);
     params_ = make_unique<Params>(param_listener_->get_params());
+    found_perspective_transform_ = false;
 
     // Initialize the tf broadcaster.
     tf_pub_ = make_unique<tf2_ros::TransformBroadcaster>(node);
@@ -91,6 +92,7 @@ private:
   unique_ptr<tf2_ros::TransformBroadcaster> tf_pub_;  //< Transform broadcaster for this node.
 
   cv::Mat perspective_transform_;
+  bool found_perspective_transform_;
 
   /**
    * Return the aruco params used for this node.
@@ -236,33 +238,36 @@ private:
       tf_pub_->sendTransform(transform_stamped);
 
       // Update perspective transform.
+      found_perspective_transform_ = true;
       perspective_transform_ =
           cv::getPerspectiveTransform(chessboard_corners, IRL_CHESSBOARD_CORNERS);
     } else {
       RCLCPP_WARN(node->get_logger(), "Couldn't find chessboard");
     }
 
-    // Set the header for the warped image message.
-    std_msgs::msg::Header img_header;
-    img_header.stamp = now;
-    img_header.frame_id = params_->chessboard_frame;
+    if (found_perspective_transform_) {
+      // Set the header for the warped image message.
+      std_msgs::msg::Header img_header;
+      img_header.stamp = now;
+      img_header.frame_id = params_->chessboard_frame;
 
-    // Create a perspective-transformed image of the chessboard.
-    static cv::Mat warped;
-    static const int BOARD_SIZE_INT = static_cast<int>(round(CHESSBOARD_SIZE));
-    cv::warpPerspective(cv_ptr->image, warped, perspective_transform_,
-                        cv::Size(BOARD_SIZE_INT, BOARD_SIZE_INT));
+      // Create a perspective-transformed image of the chessboard.
+      static cv::Mat warped;
+      static const int BOARD_SIZE_INT = static_cast<int>(round(CHESSBOARD_SIZE));
+      cv::warpPerspective(cv_ptr->image, warped, perspective_transform_,
+                          cv::Size(BOARD_SIZE_INT, BOARD_SIZE_INT));
 
-    // If we cannot currently see the chessboard, draw a red square around the image. This indicates
-    // that the perspective transform may not be accurate.
-    if (!found)
-      cv::rectangle(warped, cv::Point(0, 0), cv::Point(BOARD_SIZE_INT, BOARD_SIZE_INT),
-                    cv::Scalar(255, 0, 0), 16);
+      // If we cannot currently see the chessboard, draw a red square around the image. This indicates
+      // that the perspective transform may not be accurate.
+      if (!found)
+        cv::rectangle(warped, cv::Point(0, 0), cv::Point(BOARD_SIZE_INT, BOARD_SIZE_INT),
+                      cv::Scalar(255, 0, 0), 16);
 
-    // Publish the perspective-transformed image.
-    sensor_msgs::msg::Image::SharedPtr msg =
-        cv_bridge::CvImage(img_header, sensor_msgs::image_encodings::RGB8, warped).toImageMsg();
-    image_pub_->publish(msg);
+      // Publish the perspective-transformed image.
+      sensor_msgs::msg::Image::SharedPtr msg =
+          cv_bridge::CvImage(img_header, sensor_msgs::image_encodings::RGB8, warped).toImageMsg();
+      image_pub_->publish(msg);
+    }
   }
 };
 
