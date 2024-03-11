@@ -33,15 +33,19 @@ static const auto ARUCO_DICT = cv::aruco::DICT_4X4_50;
 static const float CHESSBOARD_SIZE = 377.825f;
 
 /**
+ * The size of one side of an aruco marker, in mm.
+ */
+static const float ARUCO_SIZE = 377.825f;
+
+/**
  * The order of the ArUco markers on the chessboard.
  */
 static const int ARUCO_ORDER[] = { 3, 0, 1, 2 };
 
 /**
- * Lookup table that determines which corner of each ArUco marker corresponds with its corner of the
- * chessboard.
+ * Lookup table that maps chessboard corners to the proper aruco corners.
  */
-static const int ARUCO_LOOKUP[] = { 3, 0, 1, 2 };
+static const int ARUCO_LOOKUP[] = { 3, 4, 9, 14 };
 
 //                                                                                                //
 // ================================= ChessboardTransform class ================================== //
@@ -141,11 +145,10 @@ private:
       }
       if (marker_index == 4) return {};
 
-      // Determine which corner of the marker matches the corner of the chessboard and add it to our
-      // output list.
-      auto marker_corners = aruco_corners[marker_index];
-      cv::Point2f correct_marker_corner = marker_corners[ARUCO_LOOKUP[id]];
-      chessboard_corners.push_back(correct_marker_corner);
+      // Add all four corners of the marker to our output list.
+      for (auto corner : aruco_corners[marker_index]) {
+        chessboard_corners.push_back(corner);
+      }
     }
 
     return chessboard_corners;
@@ -169,14 +172,30 @@ private:
       cv::Point2f(0.0, 0.0),
     };
 
-    // We use the SOLVEPNP_IPPE_SQUARE method to estimate the pose of the chessboard. This method
-    // requires that the real-world points are arranged in the below format. We also convert the
-    // chessboard size from mm to meters, since ROS uses meters as its unit of distance.
+    // To increase accuracy, we use all four corners of each ArUco marker to estimate the pose of
+    // the chessboard. This is the real-world position of the corners of the chessboard, measured in
+    // meters.
     static const double HALF_CB = CHESSBOARD_SIZE / 2000.0;  // Half of chessboard size, in meters.
+    static const double HALF_A = ARUCO_SIZE / 2000.0;        // Half of aruco size, in meters.
     static const vector<cv::Point3d> PNP_CHESSBOARD_CORNERS = {
       cv::Point3d(-HALF_CB, HALF_CB, 0.0),
+      cv::Point3d(-HALF_CB + HALF_A, HALF_CB, 0.0),
+      cv::Point3d(-HALF_CB + HALF_A, HALF_CB - HALF_A, 0.0),
+      cv::Point3d(-HALF_CB, HALF_CB - HALF_A, 0.0),
+
+      cv::Point3d(HALF_CB - HALF_A, HALF_CB, 0.0),
       cv::Point3d(HALF_CB, HALF_CB, 0.0),
+      cv::Point3d(HALF_CB, HALF_CB - HALF_A, 0.0),
+      cv::Point3d(HALF_CB - HALF_A, HALF_CB - HALF_A, 0.0),
+
+      cv::Point3d(HALF_CB - HALF_A, -HALF_CB + HALF_A, 0.0),
+      cv::Point3d(HALF_CB, -HALF_CB + HALF_A, 0.0),
       cv::Point3d(HALF_CB, -HALF_CB, 0.0),
+      cv::Point3d(HALF_CB - HALF_A, -HALF_CB, 0.0),
+
+      cv::Point3d(-HALF_CB, -HALF_CB + HALF_A, 0.0),
+      cv::Point3d(-HALF_CB + HALF_A, -HALF_CB + HALF_A, 0.0),
+      cv::Point3d(-HALF_CB + HALF_A, -HALF_CB, 0.0),
       cv::Point3d(-HALF_CB, -HALF_CB, 0.0),
     };
 
@@ -212,14 +231,14 @@ private:
     auto chessboard_corners = find_chessboard_corners(cv_ptr->image);
 
     // If the chessboard was found in the image, update TF and perspective transform.
-    bool found = chessboard_corners.size() == 4;
+    bool found = chessboard_corners.size() == 16;
     if (found) {
       // Estimate pose.
       cv::Vec3d rvec;
       cv::Vec3d tvec;
       cv::Mat rmat(3, 3, CV_64F);
       cv::solvePnP(PNP_CHESSBOARD_CORNERS, chessboard_corners, camera_matrix, dist_coeffs, rvec,
-                   tvec, false, cv::SOLVEPNP_IPPE_SQUARE);
+                   tvec, false, cv::SOLVEPNP_IPPE);
       cv::Rodrigues(rvec, rmat);
 
       // Convert pose to tf2 format.
@@ -239,8 +258,9 @@ private:
 
       // Update perspective transform.
       found_perspective_transform_ = true;
-      perspective_transform_ =
-          cv::getPerspectiveTransform(chessboard_corners, IRL_CHESSBOARD_CORNERS);
+      vector<cv::Point2f> outer_corners;
+      for (int i = 0; i < 4; ++i) outer_corners.push_back(chessboard_corners[ARUCO_LOOKUP[i]]);
+      perspective_transform_ = cv::getPerspectiveTransform(outer_corners, IRL_CHESSBOARD_CORNERS);
     } else {
       RCLCPP_WARN(node->get_logger(), "Couldn't find chessboard");
     }
@@ -257,8 +277,8 @@ private:
       cv::warpPerspective(cv_ptr->image, warped, perspective_transform_,
                           cv::Size(BOARD_SIZE_INT, BOARD_SIZE_INT));
 
-      // If we cannot currently see the chessboard, draw a red square around the image. This indicates
-      // that the perspective transform may not be accurate.
+      // If we cannot currently see the chessboard, draw a red square around the image. This
+      // indicates that the perspective transform may not be accurate.
       if (!found)
         cv::rectangle(warped, cv::Point(0, 0), cv::Point(BOARD_SIZE_INT, BOARD_SIZE_INT),
                       cv::Scalar(255, 0, 0), 16);
