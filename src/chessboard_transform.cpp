@@ -251,9 +251,9 @@ private:
       tf2::Transform tf_transform(rmat_tf, tvec_tf);
       geometry_msgs::msg::TransformStamped transform_stamped;
       transform_stamped.header.stamp = now;
-      transform_stamped.header.frame_id = camera_frame;
-      transform_stamped.child_frame_id = params_->chessboard_frame;
-      transform_stamped.transform = tf2::toMsg(tf_transform);
+      transform_stamped.header.frame_id = params_->chessboard_frame;
+      transform_stamped.child_frame_id = camera_frame;
+      transform_stamped.transform = tf2::toMsg(tf_transform.inverse());
       tf_pub_->sendTransform(transform_stamped);
 
       // Update perspective transform.
