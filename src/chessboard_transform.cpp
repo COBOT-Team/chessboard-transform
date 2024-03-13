@@ -35,7 +35,7 @@ static const float CHESSBOARD_SIZE = 377.825f;
 /**
  * The size of one side of an aruco marker, in mm.
  */
-static const float ARUCO_SIZE = 377.825f;
+static const float ARUCO_SIZE = 18.5f;
 
 /**
  * The order of the ArUco markers on the chessboard.
@@ -45,7 +45,7 @@ static const int ARUCO_ORDER[] = { 3, 0, 1, 2 };
 /**
  * Lookup table that maps chessboard corners to the proper aruco corners.
  */
-static const int ARUCO_LOOKUP[] = { 3, 4, 9, 14 };
+static const int ARUCO_LOOKUP[] = { 2, 7, 8, 13 };
 
 //                                                                                                //
 // ================================= ChessboardTransform class ================================== //
@@ -176,26 +176,26 @@ private:
     // the chessboard. This is the real-world position of the corners of the chessboard, measured in
     // meters.
     static const double HALF_CB = CHESSBOARD_SIZE / 2000.0;  // Half of chessboard size, in meters.
-    static const double HALF_A = ARUCO_SIZE / 2000.0;        // Half of aruco size, in meters.
+    static const double ARUCO = ARUCO_SIZE / 1000.0;         // Aruco size, in meters.
     static const vector<cv::Point3d> PNP_CHESSBOARD_CORNERS = {
       cv::Point3d(-HALF_CB, HALF_CB, 0.0),
-      cv::Point3d(-HALF_CB + HALF_A, HALF_CB, 0.0),
-      cv::Point3d(-HALF_CB + HALF_A, HALF_CB - HALF_A, 0.0),
-      cv::Point3d(-HALF_CB, HALF_CB - HALF_A, 0.0),
+      cv::Point3d(-HALF_CB + ARUCO, HALF_CB, 0.0),
+      cv::Point3d(-HALF_CB + ARUCO, HALF_CB - ARUCO, 0.0),
+      cv::Point3d(-HALF_CB, HALF_CB - ARUCO, 0.0),
 
-      cv::Point3d(HALF_CB - HALF_A, HALF_CB, 0.0),
+      cv::Point3d(HALF_CB - ARUCO, HALF_CB, 0.0),
       cv::Point3d(HALF_CB, HALF_CB, 0.0),
-      cv::Point3d(HALF_CB, HALF_CB - HALF_A, 0.0),
-      cv::Point3d(HALF_CB - HALF_A, HALF_CB - HALF_A, 0.0),
+      cv::Point3d(HALF_CB, HALF_CB - ARUCO, 0.0),
+      cv::Point3d(HALF_CB - ARUCO, HALF_CB - ARUCO, 0.0),
 
-      cv::Point3d(HALF_CB - HALF_A, -HALF_CB + HALF_A, 0.0),
-      cv::Point3d(HALF_CB, -HALF_CB + HALF_A, 0.0),
+      cv::Point3d(HALF_CB - ARUCO, -HALF_CB + ARUCO, 0.0),
+      cv::Point3d(HALF_CB, -HALF_CB + ARUCO, 0.0),
       cv::Point3d(HALF_CB, -HALF_CB, 0.0),
-      cv::Point3d(HALF_CB - HALF_A, -HALF_CB, 0.0),
+      cv::Point3d(HALF_CB - ARUCO, -HALF_CB, 0.0),
 
-      cv::Point3d(-HALF_CB, -HALF_CB + HALF_A, 0.0),
-      cv::Point3d(-HALF_CB + HALF_A, -HALF_CB + HALF_A, 0.0),
-      cv::Point3d(-HALF_CB + HALF_A, -HALF_CB, 0.0),
+      cv::Point3d(-HALF_CB, -HALF_CB + ARUCO, 0.0),
+      cv::Point3d(-HALF_CB + ARUCO, -HALF_CB + ARUCO, 0.0),
+      cv::Point3d(-HALF_CB + ARUCO, -HALF_CB, 0.0),
       cv::Point3d(-HALF_CB, -HALF_CB, 0.0),
     };
 
