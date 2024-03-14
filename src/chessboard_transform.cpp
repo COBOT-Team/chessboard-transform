@@ -117,9 +117,12 @@ private:
    * list.
    *
    * @param[in] img OpenCV image to find the chessboard in.
-   * @return The corners of the chessboard, or an empty vector if the chessboard was not found.
+   * @param[in] real_world_corners The real-world corners of the chessboard, measured in m.
+   * @return A tuple containing the image corners and the corresponding real-world corners of the
+   * chessboard.
    */
-  vector<cv::Point2f> find_chessboard_corners(cv::Mat img)
+  tuple<vector<cv::Point2f>, vector<cv::Point2d>>
+  find_chessboard_corners(cv::Mat img, vector<vector<cv::Point3d>> real_world_corners)
   {
     // Static variables to avoid re-initialization and re-allocation.
     static const auto aruco_detector_params = aruco_params();
@@ -135,7 +138,8 @@ private:
     if (aruco_ids.size() < 4) return {};
 
     // Find the proper markers in order and add the correct corners to our output list.
-    vector<cv::Point2f> chessboard_corners;
+    vector<cv::Point2f> image_corners;
+    vector<cv::Point2d> object_corners;
     for (int i = 0; i < 4; ++i) {
       // Search for the next marker in the order.
       auto id = ARUCO_ORDER[i];
@@ -147,11 +151,16 @@ private:
 
       // Add all four corners of the marker to our output list.
       for (auto corner : aruco_corners[marker_index]) {
-        chessboard_corners.push_back(corner);
+        image_corners.push_back(corner);
+      }
+
+      for (size_t j = 0; j < aruco_corners[marker_index].size(); ++j) {
+        image_corners.emplace_back(aruco_corners[marker_index][j]);
+        object_corners.emplace_back(real_world_corners[marker_index][j]);
       }
     }
 
-    return chessboard_corners;
+    return { image_corners, object_corners };
   }
 
   /**
@@ -177,26 +186,31 @@ private:
     // meters.
     static const double HALF_CB = CHESSBOARD_SIZE / 2000.0;  // Half of chessboard size, in meters.
     static const double ARUCO = ARUCO_SIZE / 1000.0;         // Aruco size, in meters.
-    static const vector<cv::Point3d> PNP_CHESSBOARD_CORNERS = {
-      cv::Point3d(-HALF_CB, HALF_CB, 0.0),
-      cv::Point3d(-HALF_CB + ARUCO, HALF_CB, 0.0),
-      cv::Point3d(-HALF_CB + ARUCO, HALF_CB - ARUCO, 0.0),
-      cv::Point3d(-HALF_CB, HALF_CB - ARUCO, 0.0),
-
-      cv::Point3d(HALF_CB - ARUCO, HALF_CB, 0.0),
-      cv::Point3d(HALF_CB, HALF_CB, 0.0),
-      cv::Point3d(HALF_CB, HALF_CB - ARUCO, 0.0),
-      cv::Point3d(HALF_CB - ARUCO, HALF_CB - ARUCO, 0.0),
-
-      cv::Point3d(HALF_CB - ARUCO, -HALF_CB + ARUCO, 0.0),
-      cv::Point3d(HALF_CB, -HALF_CB + ARUCO, 0.0),
-      cv::Point3d(HALF_CB, -HALF_CB, 0.0),
-      cv::Point3d(HALF_CB - ARUCO, -HALF_CB, 0.0),
-
-      cv::Point3d(-HALF_CB, -HALF_CB + ARUCO, 0.0),
-      cv::Point3d(-HALF_CB + ARUCO, -HALF_CB + ARUCO, 0.0),
-      cv::Point3d(-HALF_CB + ARUCO, -HALF_CB, 0.0),
-      cv::Point3d(-HALF_CB, -HALF_CB, 0.0),
+    static const vector<vector<cv::Point3d>> PNP_CHESSBOARD_CORNERS = {
+      {
+          cv::Point3d(-HALF_CB, HALF_CB, 0.0),
+          cv::Point3d(-HALF_CB + ARUCO, HALF_CB, 0.0),
+          cv::Point3d(-HALF_CB + ARUCO, HALF_CB - ARUCO, 0.0),
+          cv::Point3d(-HALF_CB, HALF_CB - ARUCO, 0.0),
+      },
+      {
+          cv::Point3d(HALF_CB - ARUCO, HALF_CB, 0.0),
+          cv::Point3d(HALF_CB, HALF_CB, 0.0),
+          cv::Point3d(HALF_CB, HALF_CB - ARUCO, 0.0),
+          cv::Point3d(HALF_CB - ARUCO, HALF_CB - ARUCO, 0.0),
+      },
+      {
+          cv::Point3d(HALF_CB - ARUCO, -HALF_CB + ARUCO, 0.0),
+          cv::Point3d(HALF_CB, -HALF_CB + ARUCO, 0.0),
+          cv::Point3d(HALF_CB, -HALF_CB, 0.0),
+          cv::Point3d(HALF_CB - ARUCO, -HALF_CB, 0.0),
+      },
+      {
+          cv::Point3d(-HALF_CB, -HALF_CB + ARUCO, 0.0),
+          cv::Point3d(-HALF_CB + ARUCO, -HALF_CB + ARUCO, 0.0),
+          cv::Point3d(-HALF_CB + ARUCO, -HALF_CB, 0.0),
+          cv::Point3d(-HALF_CB, -HALF_CB, 0.0),
+      },
     };
 
     auto now = rclcpp::Clock().now();
@@ -228,17 +242,19 @@ private:
     cv::Mat dist_coeffs(1, 5, CV_64F, (void*)cinfo->d.data());
 
     // Find the chessboard in the image.
-    auto chessboard_corners = find_chessboard_corners(cv_ptr->image);
+    auto chessboard_corners = find_chessboard_corners(cv_ptr->image, PNP_CHESSBOARD_CORNERS);
+    auto image_corners = get<0>(chessboard_corners);
+    auto object_corners = get<1>(chessboard_corners);
 
     // If the chessboard was found in the image, update TF and perspective transform.
-    bool found = chessboard_corners.size() == 16;
+    bool found = image_corners.size() >= 4;
     if (found) {
       // Estimate pose.
       cv::Vec3d rvec;
       cv::Vec3d tvec;
       cv::Mat rmat(3, 3, CV_64F);
-      cv::solvePnP(PNP_CHESSBOARD_CORNERS, chessboard_corners, camera_matrix, dist_coeffs, rvec,
-                   tvec, false, cv::SOLVEPNP_IPPE);
+      cv::solvePnP(object_corners, image_corners, camera_matrix, dist_coeffs, rvec, tvec, false,
+                   cv::SOLVEPNP_IPPE);
       cv::Rodrigues(rvec, rmat);
 
       // Convert pose to tf2 format.
@@ -256,11 +272,13 @@ private:
       transform_stamped.transform = tf2::toMsg(tf_transform.inverse());
       tf_pub_->sendTransform(transform_stamped);
 
-      // Update perspective transform.
-      found_perspective_transform_ = true;
-      vector<cv::Point2f> outer_corners;
-      for (int i = 0; i < 4; ++i) outer_corners.push_back(chessboard_corners[ARUCO_LOOKUP[i]]);
-      perspective_transform_ = cv::getPerspectiveTransform(outer_corners, IRL_CHESSBOARD_CORNERS);
+      // Update perspective transform if we have all four corners.
+      if (image_corners.size() == 16) {
+        found_perspective_transform_ = true;
+        vector<cv::Point2f> outer_corners;
+        for (int i = 0; i < 4; ++i) outer_corners.push_back(image_corners[ARUCO_LOOKUP[i]]);
+        perspective_transform_ = cv::getPerspectiveTransform(outer_corners, IRL_CHESSBOARD_CORNERS);
+      }
     } else {
       RCLCPP_WARN(node->get_logger(), "Couldn't find chessboard");
     }
