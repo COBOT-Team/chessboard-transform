@@ -173,8 +173,9 @@ private:
   void image_callback(const sensor_msgs::msg::Image::ConstSharedPtr& image,
                       const sensor_msgs::msg::CameraInfo::ConstSharedPtr& cinfo)
   {
-    // The corners of the real-world chessboard, measured in mm.
-    static const vector<cv::Point2f> IRL_CHESSBOARD_CORNERS = {
+    // The corners of the real-world chessboard, measured in mm. This is used for the perspective
+    // transform.
+    static const vector<cv::Point2f> PERSPECTIVE_CHESSBOARD_CORNERS = {
       cv::Point2f(0.0, CHESSBOARD_SIZE),
       cv::Point2f(CHESSBOARD_SIZE, CHESSBOARD_SIZE),
       cv::Point2f(CHESSBOARD_SIZE, 0.0),
@@ -277,7 +278,7 @@ private:
         found_perspective_transform_ = true;
         vector<cv::Point2f> outer_corners;
         for (int i = 0; i < 4; ++i) outer_corners.push_back(image_corners[ARUCO_LOOKUP[i]]);
-        perspective_transform_ = cv::getPerspectiveTransform(outer_corners, IRL_CHESSBOARD_CORNERS);
+        perspective_transform_ = cv::getPerspectiveTransform(outer_corners, PERSPECTIVE_CHESSBOARD_CORNERS);
       }
     } else {
       RCLCPP_WARN(node->get_logger(), "Couldn't find chessboard");
