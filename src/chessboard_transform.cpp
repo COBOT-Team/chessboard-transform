@@ -121,7 +121,7 @@ private:
    * @return A tuple containing the image corners and the corresponding real-world corners of the
    * chessboard.
    */
-  tuple<vector<cv::Point2f>, vector<cv::Point2d>>
+  tuple<vector<cv::Point2f>, vector<cv::Point3d>>
   find_chessboard_corners(cv::Mat img, vector<vector<cv::Point3d>> real_world_corners)
   {
     // Static variables to avoid re-initialization and re-allocation.
@@ -139,7 +139,7 @@ private:
 
     // Find the proper markers in order and add the correct corners to our output list.
     vector<cv::Point2f> image_corners;
-    vector<cv::Point2d> object_corners;
+    vector<cv::Point3d> object_corners;
     for (int i = 0; i < 4; ++i) {
       // Search for the next marker in the order.
       auto id = ARUCO_ORDER[i];
